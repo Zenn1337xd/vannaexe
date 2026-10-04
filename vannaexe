@@ -1,6 +1,6 @@
--- ==========================================
--- Anh Vanna Exe | Map Eggs Hub v2.0
--- ==========================================
+-- =======================================================
+--            🌶️ VANNA HUB EXE | MAP EGGS HUB             
+-- =======================================================
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -20,317 +20,345 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     RootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
-local Config = {
-    ESP = false,
-    AutoSteal = false,
+-- Safe GUI container (Delta / Mobile executor compatible)
+local GuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+local oldGui = GuiParent:FindFirstChild("VannaHubExeGui")
+if oldGui then oldGui:Destroy() end
+
+-- State & Settings
+local Settings = {
+    Speed = 16,
     InfiniteJump = false,
     JumpPowerMult = 1,
-    SpeedBoost = 16,
+    Noclip = false,
+    ESP = false,
+    FilterRanchEggs = true,
+    AutoSteal = false,
     BaseCFrame = nil,
-    TargetEggKeywords = {"Solaris", "Blackhole", "Cherub", "Volcanic", "Galaxy", "Bloom"},
-    IgnoredZones = {"Ranch", "Plot", "Base", "Nest", "Owned"}
+    TargetRarities = {"Solaris", "Blackhole", "Cherub", "Bloom", "Galaxy", "Volcanic", "Ethereal", "Divine"}
 }
 
-local function Notify(title, text)
+-- Notification Helper
+local function SendNotification(title, msg)
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = title,
-            Text = text,
+            Text = msg,
             Duration = 2.5
         })
     end)
 end
 
-local function IsEggInOwnedRanch(model)
+-- Check if an egg is inside an owned ranch/base
+local function IsInOwnedBase(model)
     local current = model.Parent
     while current and current ~= Workspace do
-        for _, keyword in ipairs(Config.IgnoredZones) do
-            if string.find(string.lower(current.Name), string.lower(keyword)) then
-                return true
-            end
+        local name = string.lower(current.Name)
+        if name:find("ranch") or name:find("plot") or name:find("base") or name:find("nest") then
+            return true
         end
         current = current.Parent
     end
     return false
 end
 
-local function GetEggWeight(model)
-    for _, child in ipairs(model:GetDescendants()) do
-        if child:IsA("TextLabel") or child:IsA("SurfaceGui") or child:IsA("BillboardGui") then
-            local text = child:IsA("TextLabel") and child.Text or ""
-            local match = string.match(text, "%d+%.?%d*%s*[kKmMbBtTqQ]?[gG]?%s*KG")
-            if match then return match end
+-- Extract KG weight from model labels
+local function ReadEggWeight(model)
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("TextLabel") and desc.Text ~= "" then
+            local found = string.match(desc.Text, "%d+%.?%d*%s*[kKmMbBtTqQ]?[gG]?%s*KG")
+            if found then return found end
         end
     end
-    return nil
+    return "Unknown KG"
 end
 
--- ESP Radar Engine
-local ActiveESP = {}
-
-local function ClearESP()
-    for _, tag in pairs(ActiveESP) do
-        if tag and tag.Parent then tag:Destroy() end
-    end
-    table.clear(ActiveESP)
-end
-
-local function UpdateESP()
-    if not Config.ESP then
-        ClearESP()
-        return
-    end
-
-    if not Character or not RootPart then return end
-
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) then
-            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-            local isTargetEgg = false
-
-            for _, kw in ipairs(Config.TargetEggKeywords) do
-                if string.find(string.lower(obj.Name), string.lower(kw)) then
-                    isTargetEgg = true
-                    break
-                end
-            end
-
-            if isTargetEgg and not IsEggInOwnedRanch(obj) then
-                local dist = math.floor((RootPart.Position - part.Position).Magnitude)
-                local weight = GetEggWeight(obj)
-
-                local billboard = obj:FindFirstChild("AV_ESP_TAG")
-                local label
-
-                if not billboard then
-                    billboard = Instance.new("BillboardGui")
-                    billboard.Name = "AV_ESP_TAG"
-                    billboard.Adornee = part
-                    billboard.Size = UDim2.new(0, 180, 0, 45)
-                    billboard.StudsOffset = Vector3.new(0, 4.5, 0)
-                    billboard.AlwaysOnTop = true
-
-                    label = Instance.new("TextLabel")
-                    label.Name = "Label"
-                    label.Size = UDim2.new(1, 0, 1, 0)
-                    label.BackgroundTransparency = 1
-                    label.TextColor3 = Color3.fromRGB(255, 220, 40)
-                    label.TextStrokeTransparency = 0
-                    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-                    label.Font = Enum.Font.SourceSansBold
-                    label.TextScaled = true
-                    label.Parent = billboard
-
-                    billboard.Parent = obj
-                    table.insert(ActiveESP, billboard)
-                else
-                    label = billboard:FindFirstChild("Label")
-                end
-
-                if label then
-                    local displayString = obj.Name .. " [" .. dist .. "m]"
-                    if weight then
-                        displayString = displayString .. " (" .. weight .. ")"
-                    end
-                    label.Text = displayString
-                end
-            elseif IsEggInOwnedRanch(obj) then
-                local existing = obj:FindFirstChild("AV_ESP_TAG")
-                if existing then existing:Destroy() end
-            end
-        end
-    end
-end
-
-task.spawn(function()
-    while true do
-        pcall(UpdateESP)
-        task.wait(1)
-    end
-end)
-
--- Speed & Jump Handlers
-RunService.Heartbeat:Connect(function()
-    if Character and Character:FindFirstChild("Humanoid") then
-        if Config.SpeedBoost > 16 then
-            Character.Humanoid.WalkSpeed = Config.SpeedBoost
-        end
-    end
-end)
-
-UserInputService.JumpRequest:Connect(function()
-    if Config.InfiniteJump and Character and Character:FindFirstChild("Humanoid") then
-        local root = Character:FindFirstChild("HumanoidRootPart")
-        if root then
-            local upwardVelocity = 50 * math.clamp(Config.JumpPowerMult, 1, 10)
-            root.Velocity = Vector3.new(root.Velocity.X, upwardVelocity, root.Velocity.Z)
-        end
-    end
-end)
-
--- Safe ScreenGui Container (supports both CoreGui and PlayerGui)
-local guiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
-local existingGui = guiParent:FindFirstChild("AnhVannaHubGui")
-if existingGui then existingGui:Destroy() end
+-- =======================================================
+--                      GUI BUILDER                       
+-- =======================================================
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AnhVannaHubGui"
+ScreenGui.Name = "VannaHubExeGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = guiParent
+ScreenGui.Parent = GuiParent
 
--- Floating Open Button ("AV")
-local OpenBtn = Instance.new("TextButton")
-OpenBtn.Name = "AV_OpenIcon"
-OpenBtn.Size = UDim2.new(0, 44, 0, 44)
-OpenBtn.Position = UDim2.new(0, 15, 0.45, 0)
-OpenBtn.BackgroundColor3 = Color3.fromRGB(180, 25, 25)
-OpenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-OpenBtn.Text = "AV"
-OpenBtn.Font = Enum.Font.SourceSansBold
-OpenBtn.TextSize = 18
-OpenBtn.Visible = false
-OpenBtn.Active = true
-OpenBtn.Draggable = true
-OpenBtn.Parent = ScreenGui
+-- Floating Reopen Icon ("VH")
+local FloatingToggle = Instance.new("TextButton")
+FloatingToggle.Name = "VannaFloatingIcon"
+FloatingToggle.Size = UDim2.new(0, 45, 0, 45)
+FloatingToggle.Position = UDim2.new(0, 15, 0.45, 0)
+FloatingToggle.BackgroundColor3 = Color3.fromRGB(200, 25, 25)
+FloatingToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+FloatingToggle.Text = "VH"
+FloatingToggle.Font = Enum.Font.SourceSansBold
+FloatingToggle.TextSize = 20
+FloatingToggle.Visible = false
+FloatingToggle.Active = true
+FloatingToggle.Draggable = true
+FloatingToggle.Parent = ScreenGui
+
+local UICorner_Icon = Instance.new("UICorner")
+UICorner_Icon.CornerRadius = UDim.new(0, 10)
+UICorner_Icon.Parent = FloatingToggle
 
 -- Main Hub Window
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 310, 0, 360)
-MainFrame.Position = UDim2.new(0.5, -155, 0.25, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(24, 24, 24)
+MainFrame.Size = UDim2.new(0, 480, 0, 310)
+MainFrame.Position = UDim2.new(0.5, -240, 0.5, -155)
+MainFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
--- Top Header
+local UICorner_Main = Instance.new("UICorner")
+UICorner_Main.CornerRadius = UDim.new(0, 8)
+UICorner_Main.Parent = MainFrame
+
+-- Top Bar
 local TopBar = Instance.new("Frame")
-TopBar.Size = UDim2.new(1, 0, 0, 34)
-TopBar.BackgroundColor3 = Color3.fromRGB(175, 25, 25)
+TopBar.Size = UDim2.new(1, 0, 0, 36)
+TopBar.BackgroundColor3 = Color3.fromRGB(190, 20, 20)
 TopBar.BorderSizePixel = 0
 TopBar.Parent = MainFrame
 
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(0.8, 0, 1, 0)
-TitleLabel.Position = UDim2.new(0.04, 0, 0, 0)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleLabel.Text = "AV | Anh Vanna Exe Hub"
-TitleLabel.Font = Enum.Font.SourceSansBold
-TitleLabel.TextSize = 14
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.Parent = TopBar
+local UICorner_Top = Instance.new("UICorner")
+UICorner_Top.CornerRadius = UDim.new(0, 8)
+UICorner_Top.Parent = TopBar
 
--- Close Button (X)
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 28, 0, 28)
-CloseBtn.Position = UDim2.new(1, -31, 0, 3)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(220, 40, 40)
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.Text = "X"
-CloseBtn.Font = Enum.Font.SourceSansBold
-CloseBtn.TextSize = 14
-CloseBtn.Parent = TopBar
+local TopTitle = Instance.new("TextLabel")
+TopTitle.Size = UDim2.new(0.7, 0, 1, 0)
+TopTitle.Position = UDim2.new(0.03, 0, 0, 0)
+TopTitle.BackgroundTransparency = 1
+TopTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+TopTitle.Text = "🌶️ Vanna Hub Exe"
+TopTitle.Font = Enum.Font.SourceSansBold
+TopTitle.TextSize = 16
+TopTitle.TextXAlignment = Enum.TextXAlignment.Left
+TopTitle.Parent = TopBar
 
-CloseBtn.MouseButton1Click:Connect(function()
+-- Close Button "X"
+local CloseButton = Instance.new("TextButton")
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Position = UDim2.new(1, -33, 0, 3)
+CloseButton.BackgroundColor3 = Color3.fromRGB(150, 15, 15)
+CloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseButton.Text = "X"
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.TextSize = 14
+CloseButton.Parent = TopBar
+
+local UICorner_Close = Instance.new("UICorner")
+UICorner_Close.CornerRadius = UDim.new(0, 6)
+UICorner_Close.Parent = CloseButton
+
+CloseButton.MouseButton1Click:Connect(function()
     MainFrame.Visible = false
-    OpenBtn.Visible = true
+    FloatingToggle.Visible = true
 end)
 
-OpenBtn.MouseButton1Click:Connect(function()
+FloatingToggle.MouseButton1Click:Connect(function()
     MainFrame.Visible = true
-    OpenBtn.Visible = false
+    FloatingToggle.Visible = false
 end)
 
--- Content Area
-local ContentScroll = Instance.new("ScrollingFrame")
-ContentScroll.Size = UDim2.new(1, -16, 1, -44)
-ContentScroll.Position = UDim2.new(0, 8, 0, 40)
-ContentScroll.BackgroundTransparency = 1
-ContentScroll.CanvasSize = UDim2.new(0, 0, 0, 460)
-ContentScroll.ScrollBarThickness = 5
-ContentScroll.Parent = MainFrame
+-- Sidebar Navigation (Chilli Hub Style)
+local SideTabs = Instance.new("Frame")
+SideTabs.Size = UDim2.new(0, 95, 1, -44)
+SideTabs.Position = UDim2.new(0, 6, 0, 40)
+SideTabs.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+SideTabs.BorderSizePixel = 0
+SideTabs.Parent = MainFrame
 
-local UIList = Instance.new("UIListLayout")
-UIList.Padding = UDim.new(0, 8)
-UIList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-UIList.Parent = ContentScroll
+local UICorner_Tabs = Instance.new("UICorner")
+UICorner_Tabs.CornerRadius = UDim.new(0, 6)
+UICorner_Tabs.Parent = SideTabs
 
-local function CreateButton(text, callback)
+local TabsLayout = Instance.new("UIListLayout")
+TabsLayout.Padding = UDim.new(0, 5)
+TabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+TabsLayout.Parent = SideTabs
+
+local TabsPadding = Instance.new("UIPadding")
+TabsPadding.PaddingTop = UDim.new(0, 6)
+TabsPadding.Parent = SideTabs
+
+-- Content Containers
+local Pages = {}
+
+local function CreatePage(pageName)
+    local page = Instance.new("ScrollingFrame")
+    page.Name = pageName
+    page.Size = UDim2.new(1, -295, 1, -44)
+    page.Position = UDim2.new(0, 107, 0, 40)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 3
+    page.Visible = false
+    page.CanvasSize = UDim2.new(0, 0, 0, 360)
+    page.Parent = MainFrame
+
+    local list = Instance.new("UIListLayout")
+    list.Padding = UDim.new(0, 6)
+    list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    list.Parent = page
+
+    Pages[pageName] = page
+    return page
+end
+
+local FarmPage = CreatePage("Farm")
+local PlayerPage = CreatePage("Player")
+local ESPPage = CreatePage("ESP")
+local MiscPage = CreatePage("Misc")
+
+local function ShowTab(name)
+    for pName, page in pairs(Pages) do
+        page.Visible = (pName == name)
+    end
+end
+
+local function AddTabBtn(name)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.96, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.Size = UDim2.new(0.88, 0, 0, 32)
+    btn.BackgroundColor3 = Color3.fromRGB(190, 25, 25)
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.SourceSansBold
     btn.TextSize = 13
-    btn.Text = text
-    btn.Parent = ContentScroll
-    btn.MouseButton1Click:Connect(function() callback(btn) end)
+    btn.Text = name
+    btn.Parent = SideTabs
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        ShowTab(name)
+    end)
+end
+
+AddTabBtn("Farm")
+AddTabBtn("Player")
+AddTabBtn("ESP")
+AddTabBtn("Misc")
+ShowTab("Farm")
+
+-- Right Map Eggs Panel
+local EggPanel = Instance.new("Frame")
+EggPanel.Size = UDim2.new(0, 175, 1, -44)
+EggPanel.Position = UDim2.new(1, -180, 0, 40)
+EggPanel.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+EggPanel.BorderSizePixel = 0
+EggPanel.Parent = MainFrame
+
+local UICorner_Panel = Instance.new("UICorner")
+UICorner_Panel.CornerRadius = UDim.new(0, 6)
+UICorner_Panel.Parent = EggPanel
+
+local PanelTitle = Instance.new("TextLabel")
+PanelTitle.Size = UDim2.new(1, 0, 0, 26)
+PanelTitle.BackgroundColor3 = Color3.fromRGB(170, 20, 20)
+PanelTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+PanelTitle.Text = "Map Eggs (Wild)"
+PanelTitle.Font = Enum.Font.SourceSansBold
+PanelTitle.TextSize = 13
+PanelTitle.Parent = EggPanel
+
+local UICorner_PTitle = Instance.new("UICorner")
+UICorner_PTitle.CornerRadius = UDim.new(0, 6)
+UICorner_PTitle.Parent = PanelTitle
+
+local EggScroll = Instance.new("ScrollingFrame")
+EggScroll.Size = UDim2.new(1, -6, 1, -32)
+EggScroll.Position = UDim2.new(0, 3, 0, 28)
+EggScroll.BackgroundTransparency = 1
+EggScroll.ScrollBarThickness = 3
+EggScroll.CanvasSize = UDim2.new(0, 0, 0, 400)
+EggScroll.Parent = EggPanel
+
+local EggListLayout = Instance.new("UIListLayout")
+EggListLayout.Padding = UDim.new(0, 4)
+EggListLayout.Parent = EggScroll
+
+-- UI Element Helpers
+local function AddToggle(parent, labelText, defaultState, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.96, 0, 0, 32)
+    btn.BackgroundColor3 = defaultState and Color3.fromRGB(35, 135, 35) or Color3.fromRGB(40, 40, 40)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 12
+    btn.Text = labelText .. ": " .. (defaultState and "ON" or "OFF")
+    btn.Parent = parent
+
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 5)
+    c.Parent = btn
+
+    local state = defaultState
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        btn.Text = labelText .. ": " .. (state and "ON" or "OFF")
+        btn.BackgroundColor3 = state and Color3.fromRGB(35, 135, 35) or Color3.fromRGB(40, 40, 40)
+        callback(state, btn)
+    end)
     return btn
 end
 
--- Toggles & Actions
-CreateButton("ESP: Filter Out Base (OFF)", function(btn)
-    Config.ESP = not Config.ESP
-    btn.Text = "ESP: Filter Out Base (" .. (Config.ESP and "ON" or "OFF") .. ")"
-    btn.BackgroundColor3 = Config.ESP and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(45, 45, 45)
-    if not Config.ESP then ClearESP() end
-end)
+local function AddButton(parent, labelText, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.96, 0, 0, 32)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 12
+    btn.Text = labelText
+    btn.Parent = parent
 
-CreateButton("Infinite Jump: OFF", function(btn)
-    Config.InfiniteJump = not Config.InfiniteJump
-    btn.Text = "Infinite Jump: " .. (Config.InfiniteJump and "ON" or "OFF")
-    btn.BackgroundColor3 = Config.InfiniteJump and Color3.fromRGB(35, 140, 35) or Color3.fromRGB(45, 45, 45)
-end)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 5)
+    c.Parent = btn
 
-CreateButton("Jump Power: 1x (Tap to Cycle 1-10)", function(btn)
-    Config.JumpPowerMult = (Config.JumpPowerMult % 10) + 1
-    btn.Text = "Jump Power: " .. Config.JumpPowerMult .. "x (Tap to Cycle 1-10)"
-end)
+    btn.MouseButton1Click:Connect(function()
+        callback(btn)
+    end)
+    return btn
+end
 
-local speedSteps = {16, 25, 35, 50, 75, 100}
-CreateButton("Speed Boost: Normal (16)", function(btn)
-    local nextIndex = 1
-    for i, val in ipairs(speedSteps) do
-        if Config.SpeedBoost == val then
-            nextIndex = (i % #speedSteps) + 1
-            break
-        end
-    end
-    Config.SpeedBoost = speedSteps[nextIndex]
-    btn.Text = "Speed Boost: " .. Config.SpeedBoost
-    btn.BackgroundColor3 = (Config.SpeedBoost > 16) and Color3.fromRGB(160, 90, 20) or Color3.fromRGB(45, 45, 45)
-end)
+-- =======================================================
+--                     TAB CONTROLS                       
+-- =======================================================
 
-CreateButton("📍 Calibrate Ranch Base", function()
+-- [ Farm Tab ]
+AddButton(FarmPage, "📍 Calibrate Ranch Nest", function()
     if Character and Character:FindFirstChild("HumanoidRootPart") then
-        Config.BaseCFrame = Character.HumanoidRootPart.CFrame
-        Notify("Calibrated", "Ranch Base position saved!")
+        Settings.BaseCFrame = Character.HumanoidRootPart.CFrame
+        SendNotification("Ranch Set", "Safe deposit point calibrated!")
     end
 end)
 
-CreateButton("Auto Steal Nearest (Wild)", function()
-    if not Config.BaseCFrame then
-        Notify("Setup Required", "Calibrate your base first!")
+AddToggle(FarmPage, "Auto Collect Eggs", false, function(val)
+    Settings.AutoSteal = val
+end)
+
+AddButton(FarmPage, "Instant Snatch Nearest", function()
+    if not Settings.BaseCFrame then
+        SendNotification("Notice", "Calibrate base location first!")
         return
     end
 
-    local targetPart = nil
-    local nearestDist = math.huge
-    local chosenEgg = nil
-
+    local bestTarget, bestDist = nil, math.huge
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") and not IsEggInOwnedRanch(obj) then
-            for _, kw in ipairs(Config.TargetEggKeywords) do
-                if string.find(string.lower(obj.Name), string.lower(kw)) then
-                    local p = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-                    if p and RootPart then
-                        local d = (RootPart.Position - p.Position).Magnitude
-                        if d < nearestDist then
-                            nearestDist = d
-                            targetPart = p
-                            chosenEgg = obj
+        if obj:IsA("Model") and (not Settings.FilterRanchEggs or not IsInOwnedBase(obj)) then
+            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            if part and RootPart then
+                for _, kw in ipairs(Settings.TargetRarities) do
+                    if obj.Name:lower():find(kw:lower()) then
+                        local d = (RootPart.Position - part.Position).Magnitude
+                        if d < bestDist then
+                            bestDist = d
+                            bestTarget = obj
                         end
                     end
                 end
@@ -338,23 +366,212 @@ CreateButton("Auto Steal Nearest (Wild)", function()
         end
     end
 
-    if targetPart and RootPart then
-        Notify("Snatching", chosenEgg.Name .. " (" .. math.floor(nearestDist) .. "m)")
+    if bestTarget and RootPart then
+        local targetPart = bestTarget.PrimaryPart or bestTarget:FindFirstChildWhichIsA("BasePart")
         RootPart.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-        task.wait(0.3)
+        task.wait(0.2)
 
-        for _, p in ipairs(chosenEgg:GetDescendants()) do
-            if p:IsA("ProximityPrompt") then
-                fireproximityprompt(p, 1)
+        for _, prompt in ipairs(bestTarget:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") then
+                fireproximityprompt(prompt, 1)
             end
         end
 
-        task.wait(0.4)
-        RootPart.CFrame = Config.BaseCFrame + Vector3.new(0, 2, 0)
-        Notify("Delivered", "Egg returned to base nest!")
+        task.wait(0.3)
+        RootPart.CFrame = Settings.BaseCFrame + Vector3.new(0, 2, 0)
+        SendNotification("Delivered", "Collected: " .. bestTarget.Name)
     else
-        Notify("None Found", "No unowned wild eggs found.")
+        SendNotification("None Found", "No wild rare eggs nearby!")
     end
 end)
 
-Notify("Anh Vanna Exe", "Hub Loaded Successfully!")
+-- [ Player Tab ]
+local speedSteps = {16, 25, 40, 60, 80, 100}
+AddButton(PlayerPage, "Speed: 16 (Cycle 1-100)", function(btn)
+    local cur = 1
+    for i, val in ipairs(speedSteps) do
+        if Settings.Speed == val then cur = (i % #speedSteps) + 1 break end
+    end
+    Settings.Speed = speedSteps[cur]
+    btn.Text = "Speed: " .. Settings.Speed .. " (Cycle 1-100)"
+end)
+
+AddToggle(PlayerPage, "Infinite Jump", false, function(val)
+    Settings.InfiniteJump = val
+end)
+
+AddButton(PlayerPage, "Jump Multiplier: 1x (1-10)", function(btn)
+    Settings.JumpPowerMult = (Settings.JumpPowerMult % 10) + 1
+    btn.Text = "Jump Multiplier: " .. Settings.JumpPowerMult .. "x (1-10)"
+end)
+
+AddToggle(PlayerPage, "Noclip", false, function(val)
+    Settings.Noclip = val
+end)
+
+-- [ ESP Tab ]
+AddToggle(ESPPage, "ESP Radar", false, function(val)
+    Settings.ESP = val
+end)
+
+AddToggle(ESPPage, "Filter Ranch Eggs", true, function(val)
+    Settings.FilterRanchEggs = val
+end)
+
+-- [ Misc Tab ]
+AddButton(MiscPage, "Rejoin Server", function()
+    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end)
+
+-- =======================================================
+--                 ENGINES & BACKGROUND LOOPS             
+-- =======================================================
+
+-- Player Speed & Noclip loops
+RunService.Stepped:Connect(function()
+    if Settings.Noclip and Character then
+        for _, part in ipairs(Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if Character and Character:FindFirstChild("Humanoid") and Settings.Speed > 16 then
+        Character.Humanoid.WalkSpeed = Settings.Speed
+    end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if Settings.InfiniteJump and Character and Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = Character.HumanoidRootPart
+        hrp.Velocity = Vector3.new(hrp.Velocity.X, 50 * Settings.JumpPowerMult, hrp.Velocity.Z)
+    end
+end)
+
+-- Live Map Eggs Side Panel & ESP Loop
+task.spawn(function()
+    while true do
+        pcall(function()
+            -- Clear old drawer list
+            for _, item in ipairs(EggScroll:GetChildren()) do
+                if item:IsA("Frame") then item:Destroy() end
+            end
+
+            if Character and RootPart then
+                for _, obj in ipairs(Workspace:GetDescendants()) do
+                    if obj:IsA("Model") then
+                        local isEgg = false
+                        for _, kw in ipairs(Settings.TargetRarities) do
+                            if obj.Name:lower():find(kw:lower()) then
+                                isEgg = true
+                                break
+                            end
+                        end
+
+                        local inBase = IsInOwnedBase(obj)
+
+                        if isEgg and (not Settings.FilterRanchEggs or not inBase) then
+                            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                            if part then
+                                local dist = math.floor((RootPart.Position - part.Position).Magnitude)
+                                local weight = ReadEggWeight(obj)
+
+                                -- 1. Side Panel Card Item
+                                local card = Instance.new("Frame")
+                                card.Size = UDim2.new(0.96, 0, 0, 48)
+                                card.BackgroundColor3 = Color3.fromRGB(38, 38, 38)
+                                card.BorderSizePixel = 0
+                                card.Parent = EggScroll
+
+                                local cardCorner = Instance.new("UICorner")
+                                cardCorner.CornerRadius = UDim.new(0, 4)
+                                cardCorner.Parent = card
+
+                                local nameLabel = Instance.new("TextLabel")
+                                nameLabel.Size = UDim2.new(1, -6, 0, 16)
+                                nameLabel.Position = UDim2.new(0, 4, 0, 2)
+                                nameLabel.BackgroundTransparency = 1
+                                nameLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+                                nameLabel.Text = obj.Name
+                                nameLabel.Font = Enum.Font.SourceSansBold
+                                nameLabel.TextSize = 11
+                                nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+                                nameLabel.Parent = card
+
+                                local infoLabel = Instance.new("TextLabel")
+                                infoLabel.Size = UDim2.new(1, -6, 0, 14)
+                                infoLabel.Position = UDim2.new(0, 4, 0, 18)
+                                infoLabel.BackgroundTransparency = 1
+                                infoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+                                infoLabel.Text = weight .. " | " .. dist .. "m"
+                                infoLabel.Font = Enum.Font.SourceSans
+                                infoLabel.TextSize = 11
+                                infoLabel.TextXAlignment = Enum.TextXAlignment.Left
+                                infoLabel.Parent = card
+
+                                local tpBtn = Instance.new("TextButton")
+                                tpBtn.Size = UDim2.new(0, 36, 0, 18)
+                                tpBtn.Position = UDim2.new(1, -39, 0.5, -9)
+                                tpBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
+                                tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                                tpBtn.Text = "TP"
+                                tpBtn.Font = Enum.Font.SourceSansBold
+                                tpBtn.TextSize = 10
+                                tpBtn.Parent = card
+
+                                local tpCorner = Instance.new("UICorner")
+                                tpCorner.CornerRadius = UDim.new(0, 4)
+                                tpCorner.Parent = tpBtn
+
+                                tpBtn.MouseButton1Click:Connect(function()
+                                    if RootPart and part then
+                                        RootPart.CFrame = part.CFrame + Vector3.new(0, 3, 0)
+                                    end
+                                end)
+
+                                -- 2. 3D World ESP Tag
+                                local espTag = part:FindFirstChild("VH_ESP")
+                                if Settings.ESP then
+                                    if not espTag then
+                                        espTag = Instance.new("BillboardGui")
+                                        espTag.Name = "VH_ESP"
+                                        espTag.Adornee = part
+                                        espTag.Size = UDim2.new(0, 150, 0, 35)
+                                        espTag.StudsOffset = Vector3.new(0, 4, 0)
+                                        espTag.AlwaysOnTop = true
+
+                                        local txt = Instance.new("TextLabel")
+                                        txt.Name = "Label"
+                                        txt.Size = UDim2.new(1, 0, 1, 0)
+                                        txt.BackgroundTransparency = 1
+                                        txt.TextColor3 = Color3.fromRGB(255, 230, 50)
+                                        txt.TextStrokeTransparency = 0
+                                        txt.Font = Enum.Font.SourceSansBold
+                                        txt.TextScaled = true
+                                        txt.Parent = espTag
+                                        espTag.Parent = part
+                                    end
+                                    local label = espTag:FindFirstChild("Label")
+                                    if label then
+                                        label.Text = obj.Name .. " [" .. dist .. "m]\n" .. weight
+                                    end
+                                else
+                                    if espTag then espTag:Destroy() end
+                                end
+                            end
+                        else
+                            local espTag = obj:FindFirstChild("VH_ESP", true)
+                            if espTag then espTag:Destroy() end
+                        end
+                    end
+                end
+            end
+        end)
+        task.wait(1.5)
+    end
+end)
+
+SendNotification("Vanna Hub Exe", "Loaded successfully! Have fun.")
