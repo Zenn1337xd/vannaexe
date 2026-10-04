@@ -1,5 +1,5 @@
 -- =======================================================
---            🌶️ VANNA HUB EXE | MAP EGGS HUB v3.0         
+--            🌶️ VANNA HUB EXE | MAP EGGS HUB v3.5         
 -- =======================================================
 
 local Players = game:GetService("Players")
@@ -20,12 +20,12 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     RootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
--- Safe GUI container (Mobile / Delta executor compatible)
+-- Safe UI Container
 local GuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
 local oldGui = GuiParent:FindFirstChild("VannaHubExeGui")
 if oldGui then oldGui:Destroy() end
 
--- Settings & State
+-- Settings & States
 local Settings = {
     Speed = 16,
     InfiniteJump = false,
@@ -34,9 +34,9 @@ local Settings = {
     ESP = false,
     FilterRanchEggs = true,
     AutoSteal = false,
-    FlySpeed = 320, -- Flight tween speed
+    FlySpeed = 350,
     BaseCFrame = nil,
-    TargetRarities = {"Solaris", "Blackhole", "Cherub", "Bloom", "Galaxy", "Volcanic", "Ethereal", "Divine"}
+    TargetRarities = {"Solaris", "Blackhole", "Cherub", "Bloom", "Galaxy", "Volcanic", "Ethereal", "Divine", "Egg"}
 }
 
 local function SendNotification(title, msg)
@@ -49,7 +49,7 @@ local function SendNotification(title, msg)
     end)
 end
 
--- Filter check for player bases
+-- Filter check for player ranches/bases
 local function IsInOwnedBase(model)
     local current = model.Parent
     while current and current ~= Workspace do
@@ -62,39 +62,126 @@ local function IsInOwnedBase(model)
     return false
 end
 
--- Extract KG weight
-local function ReadEggWeight(model)
-    for _, desc in ipairs(model:GetDescendants()) do
-        if desc:IsA("TextLabel") and desc.Text ~= "" then
-            local found = string.match(desc.Text, "%d+%.?%d*%s*[kKmMbBtTqQ]?[gG]?%s*KG")
-            if found then return found end
+-- Weight number formatter (e.g. 17730 -> 17.73K KG)
+local function FormatNumber(num)
+    if typeof(num) ~= "number" then num = tonumber(num) end
+    if not num then return nil end
+    if num >= 1e12 then
+        return string.format("%.2fT KG", num / 1e12)
+    elseif num >= 1e9 then
+        return string.format("%.2fB KG", num / 1e9)
+    elseif num >= 1e6 then
+        return string.format("%.2fM KG", num / 1e6)
+    elseif num >= 1e3 then
+        return string.format("%.2fK KG", num / 1e3)
+    else
+        return string.format("%.2f KG", num)
+    end
+end
+
+-- Deep extraction for Egg KG & Rarity
+local function GetEggInfo(model)
+    local weightStr = nil
+    local rarityStr = nil
+
+    -- 1. Check Attributes on Model and Parts
+    for _, obj in ipairs({model, model.PrimaryPart, model:FindFirstChildWhichIsA("BasePart")}) do
+        if obj then
+            for attrName, attrVal in pairs(obj:GetAttributes()) do
+                local lower = string.lower(attrName)
+                if lower:find("weight") or lower:find("kg") or lower:find("size") or lower:find("mass") then
+                    if typeof(attrVal) == "number" then
+                        weightStr = FormatNumber(attrVal)
+                    elseif typeof(attrVal) == "string" then
+                        weightStr = attrVal
+                    end
+                elseif lower:find("rarity") or lower:find("tier") then
+                    rarityStr = tostring(attrVal)
+                end
+            end
         end
     end
-    return "Unknown KG"
+
+    -- 2. Check internal Value objects
+    if not weightStr then
+        for _, desc in ipairs(model:GetDescendants()) do
+            if desc:IsA("ValueBase") then
+                local lower = string.lower(desc.Name)
+                if lower:find("weight") or lower:find("kg") or lower:find("size") then
+                    if typeof(desc.Value) == "number" then
+                        weightStr = FormatNumber(desc.Value)
+                    else
+                        weightStr = tostring(desc.Value)
+                    end
+                elseif lower:find("rarity") or lower:find("tier") then
+                    rarityStr = tostring(desc.Value)
+                end
+            end
+        end
+    end
+
+    -- 3. Check TextLabels (stripping rich text tags)
+    if not weightStr then
+        for _, desc in ipairs(model:GetDescendants()) do
+            if desc:IsA("TextLabel") and desc.Text ~= "" and desc.Name ~= "Label" and not desc:IsDescendantOf(GuiParent) then
+                local clean = string.gsub(desc.Text, "<[^>]->", "")
+                local found = string.match(clean, "(%d+%.?%d*%s*[KkMmBbTtQq]?%s*[Kk][Gg])")
+                if found then
+                    weightStr = found
+                    break
+                end
+            end
+        end
+    end
+
+    -- 4. Check ProximityPrompt metadata
+    if not weightStr then
+        for _, p in ipairs(model:GetDescendants()) do
+            if p:IsA("ProximityPrompt") then
+                local combined = p.ObjectText .. " " .. p.ActionText
+                local found = string.match(combined, "(%d+%.?%d*%s*[KkMmBbTtQq]?%s*[Kk][Gg])")
+                if found then
+                    weightStr = found
+                    break
+                end
+            end
+        end
+    end
+
+    weightStr = weightStr or "Standard KG"
+    return weightStr, rarityStr
 end
 
 -- =======================================================
---            SMOOTH FLY & AUTO-STEAL CORE ENGINE         
+--            FAST FLIGHT & AUTO-STEAL CORE ENGINE         
 -- =======================================================
 
 local isBusyStealing = false
 
-local function FlyTo(targetCFrame)
+-- Physics-safe flight movement
+local function SafeFlight(targetCFrame)
     if not Character or not RootPart then return false end
-    local distance = (RootPart.Position - targetCFrame.Position).Magnitude
-    local duration = math.clamp(distance / Settings.FlySpeed, 0.25, 4.5)
+    local dist = (RootPart.Position - targetCFrame.Position).Magnitude
+    local duration = math.clamp(dist / Settings.FlySpeed, 0.2, 4.0)
+
+    -- Anchor character temporarily to bypass collision snags
+    local wasAnchored = RootPart.Anchored
+    RootPart.Anchored = true
 
     local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(RootPart, tweenInfo, {CFrame = targetCFrame})
     tween:Play()
     tween.Completed:Wait()
+
+    RootPart.Anchored = wasAnchored
     return true
 end
 
+-- Collect egg, instant pick up, and return to base
 local function StealEgg(eggModel)
     if isBusyStealing then return end
     if not Settings.BaseCFrame then
-        SendNotification("Ranch Missing", "Calibrate Ranch Nest first!")
+        SendNotification("Notice", "Please Calibrate Ranch Nest first!")
         return
     end
 
@@ -103,35 +190,57 @@ local function StealEgg(eggModel)
 
     isBusyStealing = true
 
-    -- 1. Fly smoothly to target egg
-    SendNotification("Vanna Hub", "Flying to " .. eggModel.Name .. "...")
-    FlyTo(part.CFrame + Vector3.new(0, 3, 0))
-    task.wait(0.2)
+    -- 1. Fly to egg
+    SafeFlight(part.CFrame + Vector3.new(0, 3, 0))
+    task.wait(0.15)
 
-    -- 2. Trigger pick up
+    -- 2. Instant Pickup (Remove HoldDuration)
     for _ = 1, 3 do
         for _, prompt in ipairs(eggModel:GetDescendants()) do
             if prompt:IsA("ProximityPrompt") then
-                pcall(function()
-                    fireproximityprompt(prompt, 0)
-                    fireproximityprompt(prompt, 1)
-                end)
+                prompt.HoldDuration = 0
+                prompt.MaxActivationDistance = 99999
+                prompt.RequiresLineOfSight = false
+                fireproximityprompt(prompt, 0)
+                fireproximityprompt(prompt, 1)
             end
         end
-        task.wait(0.15)
+        task.wait(0.1)
     end
 
-    task.wait(0.3)
+    task.wait(0.2)
 
-    -- 3. Fly back to safe deposit nest
-    SendNotification("Vanna Hub", "Delivering to Base Nest...")
-    FlyTo(Settings.BaseCFrame + Vector3.new(0, 2.5, 0))
+    -- 3. Fly back to Ranch nest
+    SafeFlight(Settings.BaseCFrame + Vector3.new(0, 1.5, 0))
 
-    -- 4. Hold at base for deposit clearance
-    task.wait(1.2)
-    SendNotification("Delivered", "Collected: " .. eggModel.Name)
+    -- 4. Hold at nest for deposit registration
+    task.wait(1.0)
+    SendNotification("Delivered", "Egg delivered to base nest!")
 
     isBusyStealing = false
+end
+
+-- Scan for closest wild egg
+local function FindBestWildEgg()
+    local bestTarget, bestDist = nil, math.huge
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and (not Settings.FilterRanchEggs or not IsInOwnedBase(obj)) then
+            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            if part and RootPart then
+                for _, kw in ipairs(Settings.TargetRarities) do
+                    if obj.Name:lower():find(kw:lower()) then
+                        local d = (RootPart.Position - part.Position).Magnitude
+                        if d < bestDist then
+                            bestDist = d
+                            bestTarget = obj
+                        end
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return bestTarget
 end
 
 -- =======================================================
@@ -162,7 +271,7 @@ local UICorner_Icon = Instance.new("UICorner")
 UICorner_Icon.CornerRadius = UDim.new(0, 10)
 UICorner_Icon.Parent = FloatingToggle
 
--- Main Hub Window
+-- Main Window
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0, 480, 0, 310)
@@ -302,7 +411,7 @@ AddTabBtn("ESP")
 AddTabBtn("Misc")
 ShowTab("Farm")
 
--- Map Eggs Right Panel
+-- Map Eggs Panel (Right Drawer)
 local EggPanel = Instance.new("Frame")
 EggPanel.Size = UDim2.new(0, 175, 1, -44)
 EggPanel.Position = UDim2.new(1, -180, 0, 40)
@@ -318,9 +427,9 @@ local PanelTitle = Instance.new("TextLabel")
 PanelTitle.Size = UDim2.new(1, 0, 0, 26)
 PanelTitle.BackgroundColor3 = Color3.fromRGB(170, 20, 20)
 PanelTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-PanelTitle.Text = "Map Eggs (Wild)"
+PanelTitle.Text = "Map Eggs (0)"
 PanelTitle.Font = Enum.Font.SourceSansBold
-PanelTitle.TextSize = 13
+PanelTitle.TextSize = 12
 PanelTitle.Parent = EggPanel
 
 local UICorner_PTitle = Instance.new("UICorner")
@@ -339,7 +448,7 @@ local EggListLayout = Instance.new("UIListLayout")
 EggListLayout.Padding = UDim.new(0, 4)
 EggListLayout.Parent = EggScroll
 
--- Button Helpers
+-- Button Builders
 local function AddToggle(parent, labelText, defaultState, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.96, 0, 0, 32)
@@ -390,44 +499,23 @@ end
 AddButton(FarmPage, "📍 Calibrate Ranch Nest", function()
     if Character and Character:FindFirstChild("HumanoidRootPart") then
         Settings.BaseCFrame = Character.HumanoidRootPart.CFrame
-        SendNotification("Ranch Set", "Safe deposit point calibrated!")
+        SendNotification("Ranch Calibrated", "Nest return coordinates saved!")
     end
 end)
 
 AddToggle(FarmPage, "Auto Collect Eggs", false, function(val)
     Settings.AutoSteal = val
     if val and not Settings.BaseCFrame then
-        SendNotification("Notice", "Make sure to Calibrate Ranch Nest first!")
+        SendNotification("Warning", "Calibrate Ranch Nest first!")
     end
 end)
-
-local function FindBestWildEgg()
-    local bestTarget, bestDist = nil, math.huge
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") and (not Settings.FilterRanchEggs or not IsInOwnedBase(obj)) then
-            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
-            if part and RootPart then
-                for _, kw in ipairs(Settings.TargetRarities) do
-                    if obj.Name:lower():find(kw:lower()) then
-                        local d = (RootPart.Position - part.Position).Magnitude
-                        if d < bestDist then
-                            bestDist = d
-                            bestTarget = obj
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return bestTarget
-end
 
 AddButton(FarmPage, "Instant Snatch Nearest", function()
     local target = FindBestWildEgg()
     if target then
         task.spawn(function() StealEgg(target) end)
     else
-        SendNotification("None Found", "No wild rare eggs nearby!")
+        SendNotification("None Found", "No unowned wild eggs found nearby!")
     end
 end)
 
@@ -470,10 +558,10 @@ AddButton(MiscPage, "Rejoin Server", function()
 end)
 
 -- =======================================================
---            BACKGROUND LOOPS & RUNNERS                  
+--            BACKGROUND RUNNERS & LOOPS                  
 -- =======================================================
 
--- Auto Steal Continuous Loop
+-- Auto Steal Continuous Collector Loop
 task.spawn(function()
     while true do
         if Settings.AutoSteal and not isBusyStealing then
@@ -484,7 +572,7 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(0.8)
+        task.wait(0.6)
     end
 end)
 
@@ -512,13 +600,15 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- Live Map Eggs Side Panel & ESP Loop
+-- Live Map Eggs Scanner & Side Panel Updater
 task.spawn(function()
     while true do
         pcall(function()
             for _, item in ipairs(EggScroll:GetChildren()) do
                 if item:IsA("Frame") then item:Destroy() end
             end
+
+            local eggCount = 0
 
             if Character and RootPart then
                 for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -536,8 +626,9 @@ task.spawn(function()
                         if isEgg and (not Settings.FilterRanchEggs or not inBase) then
                             local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
                             if part then
+                                eggCount = eggCount + 1
                                 local dist = math.floor((RootPart.Position - part.Position).Magnitude)
-                                local weight = ReadEggWeight(obj)
+                                local weight, rarity = GetEggInfo(obj)
 
                                 -- 1. Side Panel Card Item
                                 local card = Instance.new("Frame")
@@ -551,36 +642,35 @@ task.spawn(function()
                                 cardCorner.Parent = card
 
                                 local nameLabel = Instance.new("TextLabel")
-                                nameLabel.Size = UDim2.new(1, -6, 0, 16)
+                                nameLabel.Size = UDim2.new(1, -44, 0, 16)
                                 nameLabel.Position = UDim2.new(0, 4, 0, 2)
                                 nameLabel.BackgroundTransparency = 1
                                 nameLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
-                                nameLabel.Text = obj.Name
+                                nameLabel.Text = (rarity and rarity .. " " or "") .. obj.Name
                                 nameLabel.Font = Enum.Font.SourceSansBold
                                 nameLabel.TextSize = 11
                                 nameLabel.TextXAlignment = Enum.TextXAlignment.Left
                                 nameLabel.Parent = card
 
                                 local infoLabel = Instance.new("TextLabel")
-                                infoLabel.Size = UDim2.new(1, -6, 0, 14)
+                                infoLabel.Size = UDim2.new(1, -44, 0, 14)
                                 infoLabel.Position = UDim2.new(0, 4, 0, 18)
                                 infoLabel.BackgroundTransparency = 1
                                 infoLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
                                 infoLabel.Text = weight .. " | " .. dist .. "m"
                                 infoLabel.Font = Enum.Font.SourceSans
-                                infoLabel.TextSize = 11
+                                infoLabel.TextSize = 10
                                 infoLabel.TextXAlignment = Enum.TextXAlignment.Left
                                 infoLabel.Parent = card
 
-                                -- TP Button with Auto Pick Up and Fly Back
                                 local tpBtn = Instance.new("TextButton")
-                                tpBtn.Size = UDim2.new(0, 36, 0, 18)
-                                tpBtn.Position = UDim2.new(1, -39, 0.5, -9)
+                                tpBtn.Size = UDim2.new(0, 36, 0, 20)
+                                tpBtn.Position = UDim2.new(1, -40, 0.5, -10)
                                 tpBtn.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
                                 tpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
                                 tpBtn.Text = "TP"
                                 tpBtn.Font = Enum.Font.SourceSansBold
-                                tpBtn.TextSize = 10
+                                tpBtn.TextSize = 11
                                 tpBtn.Parent = card
 
                                 local tpCorner = Instance.new("UICorner")
@@ -630,9 +720,13 @@ task.spawn(function()
                     end
                 end
             end
+
+            -- Update total count in title
+            PanelTitle.Text = "Map Eggs (" .. eggCount .. ")"
+            EggScroll.CanvasSize = UDim2.new(0, 0, 0, eggCount * 52)
         end)
-        task.wait(1.5)
+        task.wait(1.2)
     end
 end)
 
-SendNotification("Vanna Hub Exe", "v3.0 Loaded! Calibrate your base first.")
+SendNotification("Vanna Hub Exe", "v3.5 Loaded! Calibrate your base first.")
