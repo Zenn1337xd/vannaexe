@@ -1,5 +1,5 @@
 -- =======================================================
---            🌶️ VANNA HUB EXE | MAP EGGS HUB             
+--            🌶️ VANNA HUB EXE | MAP EGGS HUB v3.0         
 -- =======================================================
 
 local Players = game:GetService("Players")
@@ -20,12 +20,12 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     RootPart = char:WaitForChild("HumanoidRootPart")
 end)
 
--- Safe GUI container (Delta / Mobile executor compatible)
+-- Safe GUI container (Mobile / Delta executor compatible)
 local GuiParent = pcall(function() return CoreGui.Name end) and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
 local oldGui = GuiParent:FindFirstChild("VannaHubExeGui")
 if oldGui then oldGui:Destroy() end
 
--- State & Settings
+-- Settings & State
 local Settings = {
     Speed = 16,
     InfiniteJump = false,
@@ -34,11 +34,11 @@ local Settings = {
     ESP = false,
     FilterRanchEggs = true,
     AutoSteal = false,
+    FlySpeed = 320, -- Flight tween speed
     BaseCFrame = nil,
     TargetRarities = {"Solaris", "Blackhole", "Cherub", "Bloom", "Galaxy", "Volcanic", "Ethereal", "Divine"}
 }
 
--- Notification Helper
 local function SendNotification(title, msg)
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
@@ -49,7 +49,7 @@ local function SendNotification(title, msg)
     end)
 end
 
--- Check if an egg is inside an owned ranch/base
+-- Filter check for player bases
 local function IsInOwnedBase(model)
     local current = model.Parent
     while current and current ~= Workspace do
@@ -62,7 +62,7 @@ local function IsInOwnedBase(model)
     return false
 end
 
--- Extract KG weight from model labels
+-- Extract KG weight
 local function ReadEggWeight(model)
     for _, desc in ipairs(model:GetDescendants()) do
         if desc:IsA("TextLabel") and desc.Text ~= "" then
@@ -74,7 +74,68 @@ local function ReadEggWeight(model)
 end
 
 -- =======================================================
---                      GUI BUILDER                       
+--            SMOOTH FLY & AUTO-STEAL CORE ENGINE         
+-- =======================================================
+
+local isBusyStealing = false
+
+local function FlyTo(targetCFrame)
+    if not Character or not RootPart then return false end
+    local distance = (RootPart.Position - targetCFrame.Position).Magnitude
+    local duration = math.clamp(distance / Settings.FlySpeed, 0.25, 4.5)
+
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(RootPart, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    return true
+end
+
+local function StealEgg(eggModel)
+    if isBusyStealing then return end
+    if not Settings.BaseCFrame then
+        SendNotification("Ranch Missing", "Calibrate Ranch Nest first!")
+        return
+    end
+
+    local part = eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart")
+    if not part or not RootPart then return end
+
+    isBusyStealing = true
+
+    -- 1. Fly smoothly to target egg
+    SendNotification("Vanna Hub", "Flying to " .. eggModel.Name .. "...")
+    FlyTo(part.CFrame + Vector3.new(0, 3, 0))
+    task.wait(0.2)
+
+    -- 2. Trigger pick up
+    for _ = 1, 3 do
+        for _, prompt in ipairs(eggModel:GetDescendants()) do
+            if prompt:IsA("ProximityPrompt") then
+                pcall(function()
+                    fireproximityprompt(prompt, 0)
+                    fireproximityprompt(prompt, 1)
+                end)
+            end
+        end
+        task.wait(0.15)
+    end
+
+    task.wait(0.3)
+
+    -- 3. Fly back to safe deposit nest
+    SendNotification("Vanna Hub", "Delivering to Base Nest...")
+    FlyTo(Settings.BaseCFrame + Vector3.new(0, 2.5, 0))
+
+    -- 4. Hold at base for deposit clearance
+    task.wait(1.2)
+    SendNotification("Delivered", "Collected: " .. eggModel.Name)
+
+    isBusyStealing = false
+end
+
+-- =======================================================
+--                      GUI SETUP                         
 -- =======================================================
 
 local ScreenGui = Instance.new("ScreenGui")
@@ -82,7 +143,7 @@ ScreenGui.Name = "VannaHubExeGui"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = GuiParent
 
--- Floating Reopen Icon ("VH")
+-- Floating Reopen Icon
 local FloatingToggle = Instance.new("TextButton")
 FloatingToggle.Name = "VannaFloatingIcon"
 FloatingToggle.Size = UDim2.new(0, 45, 0, 45)
@@ -138,7 +199,7 @@ TopTitle.TextSize = 16
 TopTitle.TextXAlignment = Enum.TextXAlignment.Left
 TopTitle.Parent = TopBar
 
--- Close Button "X"
+-- Close Button (X)
 local CloseButton = Instance.new("TextButton")
 CloseButton.Size = UDim2.new(0, 30, 0, 30)
 CloseButton.Position = UDim2.new(1, -33, 0, 3)
@@ -163,7 +224,7 @@ FloatingToggle.MouseButton1Click:Connect(function()
     FloatingToggle.Visible = false
 end)
 
--- Sidebar Navigation (Chilli Hub Style)
+-- Sidebar Tabs
 local SideTabs = Instance.new("Frame")
 SideTabs.Size = UDim2.new(0, 95, 1, -44)
 SideTabs.Position = UDim2.new(0, 6, 0, 40)
@@ -184,7 +245,6 @@ local TabsPadding = Instance.new("UIPadding")
 TabsPadding.PaddingTop = UDim.new(0, 6)
 TabsPadding.Parent = SideTabs
 
--- Content Containers
 local Pages = {}
 
 local function CreatePage(pageName)
@@ -233,9 +293,7 @@ local function AddTabBtn(name)
     corner.CornerRadius = UDim.new(0, 6)
     corner.Parent = btn
 
-    btn.MouseButton1Click:Connect(function()
-        ShowTab(name)
-    end)
+    btn.MouseButton1Click:Connect(function() ShowTab(name) end)
 end
 
 AddTabBtn("Farm")
@@ -244,7 +302,7 @@ AddTabBtn("ESP")
 AddTabBtn("Misc")
 ShowTab("Farm")
 
--- Right Map Eggs Panel
+-- Map Eggs Right Panel
 local EggPanel = Instance.new("Frame")
 EggPanel.Size = UDim2.new(0, 175, 1, -44)
 EggPanel.Position = UDim2.new(1, -180, 0, 40)
@@ -281,7 +339,7 @@ local EggListLayout = Instance.new("UIListLayout")
 EggListLayout.Padding = UDim.new(0, 4)
 EggListLayout.Parent = EggScroll
 
--- UI Element Helpers
+-- Button Helpers
 local function AddToggle(parent, labelText, defaultState, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.96, 0, 0, 32)
@@ -320,14 +378,12 @@ local function AddButton(parent, labelText, callback)
     c.CornerRadius = UDim.new(0, 5)
     c.Parent = btn
 
-    btn.MouseButton1Click:Connect(function()
-        callback(btn)
-    end)
+    btn.MouseButton1Click:Connect(function() callback(btn) end)
     return btn
 end
 
 -- =======================================================
---                     TAB CONTROLS                       
+--                     PAGE BUTTONS                       
 -- =======================================================
 
 -- [ Farm Tab ]
@@ -340,14 +396,12 @@ end)
 
 AddToggle(FarmPage, "Auto Collect Eggs", false, function(val)
     Settings.AutoSteal = val
+    if val and not Settings.BaseCFrame then
+        SendNotification("Notice", "Make sure to Calibrate Ranch Nest first!")
+    end
 end)
 
-AddButton(FarmPage, "Instant Snatch Nearest", function()
-    if not Settings.BaseCFrame then
-        SendNotification("Notice", "Calibrate base location first!")
-        return
-    end
-
+local function FindBestWildEgg()
     local bestTarget, bestDist = nil, math.huge
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("Model") and (not Settings.FilterRanchEggs or not IsInOwnedBase(obj)) then
@@ -365,21 +419,13 @@ AddButton(FarmPage, "Instant Snatch Nearest", function()
             end
         end
     end
+    return bestTarget
+end
 
-    if bestTarget and RootPart then
-        local targetPart = bestTarget.PrimaryPart or bestTarget:FindFirstChildWhichIsA("BasePart")
-        RootPart.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
-        task.wait(0.2)
-
-        for _, prompt in ipairs(bestTarget:GetDescendants()) do
-            if prompt:IsA("ProximityPrompt") then
-                fireproximityprompt(prompt, 1)
-            end
-        end
-
-        task.wait(0.3)
-        RootPart.CFrame = Settings.BaseCFrame + Vector3.new(0, 2, 0)
-        SendNotification("Delivered", "Collected: " .. bestTarget.Name)
+AddButton(FarmPage, "Instant Snatch Nearest", function()
+    local target = FindBestWildEgg()
+    if target then
+        task.spawn(function() StealEgg(target) end)
     else
         SendNotification("None Found", "No wild rare eggs nearby!")
     end
@@ -424,12 +470,27 @@ AddButton(MiscPage, "Rejoin Server", function()
 end)
 
 -- =======================================================
---                 ENGINES & BACKGROUND LOOPS             
+--            BACKGROUND LOOPS & RUNNERS                  
 -- =======================================================
 
--- Player Speed & Noclip loops
+-- Auto Steal Continuous Loop
+task.spawn(function()
+    while true do
+        if Settings.AutoSteal and not isBusyStealing then
+            if Settings.BaseCFrame then
+                local target = FindBestWildEgg()
+                if target then
+                    StealEgg(target)
+                end
+            end
+        end
+        task.wait(0.8)
+    end
+end)
+
+-- Noclip & Speed Loops
 RunService.Stepped:Connect(function()
-    if Settings.Noclip and Character then
+    if (Settings.Noclip or isBusyStealing) and Character then
         for _, part in ipairs(Character:GetDescendants()) do
             if part:IsA("BasePart") then
                 part.CanCollide = false
@@ -455,7 +516,6 @@ end)
 task.spawn(function()
     while true do
         pcall(function()
-            -- Clear old drawer list
             for _, item in ipairs(EggScroll:GetChildren()) do
                 if item:IsA("Frame") then item:Destroy() end
             end
@@ -512,6 +572,7 @@ task.spawn(function()
                                 infoLabel.TextXAlignment = Enum.TextXAlignment.Left
                                 infoLabel.Parent = card
 
+                                -- TP Button with Auto Pick Up and Fly Back
                                 local tpBtn = Instance.new("TextButton")
                                 tpBtn.Size = UDim2.new(0, 36, 0, 18)
                                 tpBtn.Position = UDim2.new(1, -39, 0.5, -9)
@@ -527,9 +588,9 @@ task.spawn(function()
                                 tpCorner.Parent = tpBtn
 
                                 tpBtn.MouseButton1Click:Connect(function()
-                                    if RootPart and part then
-                                        RootPart.CFrame = part.CFrame + Vector3.new(0, 3, 0)
-                                    end
+                                    task.spawn(function()
+                                        StealEgg(obj)
+                                    end)
                                 end)
 
                                 -- 2. 3D World ESP Tag
@@ -574,4 +635,4 @@ task.spawn(function()
     end
 end)
 
-SendNotification("Vanna Hub Exe", "Loaded successfully! Have fun.")
+SendNotification("Vanna Hub Exe", "v3.0 Loaded! Calibrate your base first.")
