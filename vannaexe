@@ -1,60 +1,8 @@
--- ========================================================
--- AV | Anh Vanna Exe Map Eggs Hub
--- Fully Optimized: Delta / Mobile Compatible
--- ========================================================
-
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
-
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-
--- Global Settings
-local Hub = {
-    ESP = false,
-    AutoSteal = false,
-    BaseCFrame = nil,
-    SpeedValue = 16,
-    SpeedEnabled = false,
-    InfJump = false,
-    JumpPowerMult = 1,
-    TargetEggKeywords = {"Solaris", "Blackhole", "Galaxy", "Bloom", "Cherub", "Volcanic", "Egg"}
-}
-
--- Safe Character Helper
-local function GetHRP()
-    local char = LocalPlayer.Character
-    return char and char:FindFirstChild("HumanoidRootPart")
-end
-
-local function GetHumanoid()
-    local char = LocalPlayer.Character
-    return char and char:FindFirstChildOfClass("Humanoid")
-end
-
-local function Notify(title, msg)
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            TitleHere is your updated script. It includes:
-
-1. **Filtered Long-Range ESP:** Automatically ignores eggs in your owned ranch/base (using your calibrated base zone) and dynamically displays the **Egg Name**, **Live Distance (M)**, and **Egg Weight (KG)**.
-2. **Speed Boost (1–100):** Uses a lag-free velocity/frame compensator so you don't get rubber-banded, kicked, or crash.
-3. **Infinite Jump (1–10 Scroll/Slider):** Smooth air-jump multiplier.
-4. **Window Controls:** An **`X`** button to close the menu, and a floating **`AV`** icon to toggle it open anytime.
-
----
-
-### Complete Code (Paste into your GitHub `vannaexe` file)
-
-```lua
--- ========================================================
--- Anh Vanna Exe | Map Eggs Hub (Ride A Pet)
--- Features: Smart ESP (Excludes Base), Auto Steal, Speed Boost, Inf Jump, Toggle UI
--- ========================================================
+-- ==========================================
+-- Anh Vanna Exe | Map Eggs Hub (Enhanced)
+-- Features: Wild Egg ESP (Dist + KG), Auto Steal,
+-- Speed Boost (1-100), Inf Jump (1-10), Close/Reopen (X)
+-- ==========================================
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -65,4 +13,186 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local RootPart = Character:WaitForChild("
+local RootPart = Character:WaitForChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    Character = char```lua
+-- Anh Vanna Exe | Map Eggs Hub v2.0
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local RootPart = Character:WaitForChild("HumanoidRootPart")
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid")
+    RootPart = char:WaitForChild("HumanoidRootPart")
+end)
+
+-- Settings & Config
+local Config = {
+    ESP = false,
+    AutoSteal = false,
+    InfiniteJump = false,
+    JumpPowerMult = 1,     -- Range 1 - 10
+    SpeedBoost = 16,        -- Default 16, Range 1 - 100
+    BaseCFrame = nil,
+    TargetEggKeywords = {"Solaris", "Blackhole", "Cherub", "Volcanic", "Galaxy", "Bloom"},
+    IgnoredZones = {"Ranch", "Plot", "Base", "Nest", "Owned"}
+}
+
+-- Notification Utility
+local function Notify(title, text)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Duration = 2.5
+        })
+    end)
+end
+
+-- Check if an egg is inside an owned ranch or safe zone
+local function IsEggInOwnedRanch(model)
+    local current = model.Parent
+    while current and current ~= Workspace do
+        for _, keyword in ipairs(Config.IgnoredZones) do
+            if string.find(string.lower(current.Name), string.lower(keyword)) then
+                return true
+            end
+        end
+        current = current.Parent
+    end
+    return false
+end
+
+-- Extract KG / Weight data from egg model if available
+local function GetEggWeight(model)
+    for _, child in ipairs(model:GetDescendants()) do
+        if child:IsA("TextLabel") or child:IsA("SurfaceGui") or child:IsA("BillboardGui") then
+            local text = child:IsA("TextLabel") and child.Text or ""
+            local match = string.match(text, "%d+%.?%d*%s*[kKmMbBtTqQ]?[gG]?%s*KG")
+            if match then return match end
+        end
+    end
+    return nil
+end
+
+-- 1. Optimized ESP Engine (Long-range, Non-Owned Only)
+local ActiveESP = {}
+
+local function ClearESP()
+    for _, tag in pairs(ActiveESP) do
+        if tag and tag.Parent then tag:Destroy() end
+    end
+    table.clear(ActiveESP)
+end
+
+local function UpdateESP()
+    if not Config.ESP then
+        ClearESP()
+        return
+    end
+
+    if not Character or not RootPart then return end
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) then
+            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+            local isTargetEgg = false
+
+            for _, kw in ipairs(Config.TargetEggKeywords) do
+                if string.find(string.lower(obj.Name), string.lower(kw)) then
+                    isTargetEgg = true
+                    break
+                end
+            end
+
+            if isTargetEgg and not IsEggInOwnedRanch(obj) then
+                local dist = math.floor((RootPart.Position - part.Position).Magnitude)
+                local weight = GetEggWeight(obj)
+
+                local billboard = obj:FindFirstChild("AV_ESP_TAG")
+                local label
+
+                if not billboard then
+                    billboard = Instance.new("BillboardGui")
+                    billboard.Name = "AV_ESP_TAG"
+                    billboard.Adornee = part
+                    billboard.Size = UDim2.new(0, 180, 0, 45)
+                    billboard.StudsOffset = Vector3.new(0, 4.5, 0)
+                    billboard.AlwaysOnTop = true
+
+                    label = Instance.new("TextLabel")
+                    label.Name = "Label"
+                    label.Size = UDim2.new(1, 0, 1, 0)
+                    label.BackgroundTransparency = 1
+                    label.TextColor3 = Color3.fromRGB(255, 220, 40)
+                    label.TextStrokeTransparency = 0
+                    label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+                    label.Font = Enum.Font.SourceSansBold
+                    label.TextScaled = true
+                    label.Parent = billboard
+
+                    billboard.Parent = obj
+                    table.insert(ActiveESP, billboard)
+                else
+                    label = billboard:FindFirstChild("Label")
+                end
+
+                if label then
+                    local displayString = obj.Name .. " [" .. dist .. "m]"
+                    if weight then
+                        displayString = displayString .. " (" .. weight .. ")"
+                    end
+                    label.Text = displayString
+                end
+            elseif IsEggInOwnedRanch(obj) then
+                local existing = obj:FindFirstChild("AV_ESP_TAG")
+                if existing then existing:Destroy() end
+            end
+        end
+    end
+end
+
+-- Refresh ESP every second to avoid performance lag
+task.spawn(function()
+    while true do
+        pcall(UpdateESP)
+        task.wait(1)
+    end
+end)
+
+-- 2. Movement Tweaks: Speed Boost & Infinite Jump
+RunService.Heartbeat:Connect(function()
+    if Character and Character:FindFirstChild("Humanoid") then
+        if Config.SpeedBoost > 16 then
+            Character.Humanoid.WalkSpeed = Config.SpeedBoost
+        end
+    end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if Config.InfiniteJump and Character and Character:FindFirstChild("Humanoid") then
+        local root = Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            local upwardVelocity = 50 * math.clamp(Config.JumpPowerMult, 1, 10)
+            root.Velocity = Vector3.new(root.Velocity.X, upwardVelocity, root.Velocity.Z)
+        end
+    end
+end)
+
+-- 3. GUI Construction
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AnhVannaHubGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+-- Floating Minimized Open
