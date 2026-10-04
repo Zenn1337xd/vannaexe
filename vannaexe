@@ -1,0 +1,236 @@
+-- Anh Vanna Exe | Map Eggs Hub (Ride A Pet)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local RootPart = Character:WaitForChild("HumanoidRootPart")
+
+-- State Variables
+local Config = {
+    ESP = false,
+    AutoSteal = false,
+    BaseCFrame = nil,
+    TargetEggs = {"Solaris", "Blackhole", "Cherub", "Volcanic", "Galaxy", "Bloom"},
+    TweenSpeed = 300
+}
+
+-- Utility: Send Custom Notification
+local function Notify(title, text)
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = title,
+        Text = text,
+        Duration = 3
+    })
+end
+
+-- 1. Calibrate Base Position
+local function CalibrateBase()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        Config.BaseCFrame = LocalPlayer.Character.HumanoidRootPart.CFrame
+        Notify("Base Calibrated", "Current location set as safe deposit zone!")
+    else
+        Notify("Error", "Character not found. Respawn and try again.")
+    end
+end
+
+-- 2. ESP Radar Engine
+local activeESP = {}
+
+local function ClearESP()
+    for _, item in pairs(activeESP) do
+        if item and item.Parent then item:Destroy() end
+    end
+    table.clear(activeESP)
+end
+
+local function CreateESP(targetModel, eggName)
+    if targetModel:FindFirstChild("AnhVannaESP") then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AnhVannaESP"
+    highlight.FillColor = Color3.fromRGB(255, 170, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.5
+    highlight.Parent = targetModel
+    table.insert(activeESP, highlight)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "AnhVannaTag"
+    billboard.Adornee = targetModel.PrimaryPart or targetModel:FindFirstChildWhichIsA("BasePart")
+    billboard.Size = UDim2.new(0, 150, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, 4, 0)
+    billboard.AlwaysOnTop = true
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255, 255, 0)
+    label.TextStrokeTransparency = 0
+    label.TextScaled = true
+    label.Text = eggName
+    label.Parent = billboard
+
+    billboard.Parent = targetModel
+    table.insert(activeESP, billboard)
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        if Config.ESP then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") then
+                    for _, name in pairs(Config.TargetEggs) do
+                        if string.find(string.lower(obj.Name), string.lower(name)) then
+                            CreateESP(obj, obj.Name)
+                        end
+                    end
+                end
+            end
+        else
+            ClearESP()
+        end
+    end
+end)
+
+-- 3. Movement & Steal Helper
+local function SafeMoveTo(targetCFrame)
+    if not Character or not Character:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = Character.HumanoidRootPart
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    local timeToTravel = math.clamp(dist / Config.TweenSpeed, 0.2, 5)
+
+    local tweenInfo = TweenInfo.new(timeToTravel, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+local function InteractWithEgg(eggModel)
+    for _, desc in pairs(eggModel:GetDescendants()) do
+        if desc:IsA("ProximityPrompt") then
+            fireproximityprompt(desc, 1)
+            return true
+        end
+    end
+    return false
+end
+
+-- 4. Auto Steal Engine
+task.spawn(function()
+    while task.wait(0.5) do
+        if Config.AutoSteal then
+            if not Config.BaseCFrame then
+                Notify("Auto Steal", "Please calibrate your Ranch Base first!")
+                Config.AutoSteal = false
+                continue
+            end
+
+            -- Find closest target egg
+            local nearestEgg = nil
+            local shortestDist = math.huge
+
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")) then
+                    for _, name in pairs(Config.TargetEggs) do
+                        if string.find(string.lower(obj.Name), string.lower(name)) then
+                            local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                            local d = (RootPart.Position - part.Position).Magnitude
+                            if d < shortestDist then
+                                shortestDist = d
+                                nearestEgg = obj
+                            end
+                        end
+                    end
+                end
+            end
+
+            -- Execute steal route
+            if nearestEgg then
+                local eggPart = nearestEgg.PrimaryPart or nearestEgg:FindFirstChildWhichIsA("BasePart")
+                Notify("Snatching Egg...", nearestEgg.Name .. " (" .. math.floor(shortestDist) .. "m away)")
+                
+                -- Teleport to egg
+                SafeMoveTo(eggPart.CFrame + Vector3.new(0, 3, 0))
+                task.wait(0.3)
+                InteractWithEgg(nearestEgg)
+                task.wait(0.5)
+
+                -- Return to base nest
+                SafeMoveTo(Config.BaseCFrame + Vector3.new(0, 2, 0))
+                Notify("Auto Steal Success", "Delivered " .. nearestEgg.Name .. " to Base!")
+                task.wait(1.5)
+            end
+        end
+    end
+end)
+
+-- 5. GUI Setup (Anh Vanna Exe)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AnhVannaExeHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 280, 0, 260)
+MainFrame.Position = UDim2.new(0.5, -140, 0.25, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.BackgroundColor3 = Color3.fromRGB(180, 20, 20)
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Text = "AV | Anh Vanna Exe Map Eggs Hub"
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 14
+Title.Parent = MainFrame
+
+local function CreateBtn(text, pos, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.9, 0, 0, 35)
+    btn.Position = pos
+    btn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = text
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 13
+    btn.Parent = MainFrame
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+-- ESP Button
+local espBtn
+espBtn = CreateBtn("ESP Radar: OFF", UDim2.new(0.05, 0, 0.18, 0), function()
+    Config.ESP = not Config.ESP
+    espBtn.Text = "ESP Radar: " .. (Config.ESP and "ON" or "OFF")
+    espBtn.BackgroundColor3 = Config.ESP and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- Auto Steal Button
+local stealBtn
+stealBtn = CreateBtn("Auto Steal: OFF", UDim2.new(0.05, 0, 0.36, 0), function()
+    Config.AutoSteal = not Config.AutoSteal
+    stealBtn.Text = "Auto Steal: " .. (Config.AutoSteal and "ON" or "OFF")
+    stealBtn.BackgroundColor3 = Config.AutoSteal and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(50, 50, 50)
+end)
+
+-- Calibrate Base Button
+CreateBtn("📍 Calibrate Base Location", UDim2.new(0.05, 0, 0.54, 0), function()
+    CalibrateBase()
+end)
+
+-- Teleport Back Button
+CreateBtn("🏠 Teleport to Ranch Nest", UDim2.new(0.05, 0, 0.72, 0), function()
+    if Config.BaseCFrame then
+        SafeMoveTo(Config.BaseCFrame)
+    else
+        Notify("Error", "No Base calibrated yet!")
+    end
+end)
